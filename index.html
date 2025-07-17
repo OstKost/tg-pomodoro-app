@@ -490,8 +490,14 @@
             loadSettings();
             loadTasks();
             loadStats();
+            
+            // Инициализация таймера с учетом настроек
+            timeLeft = settings.workDuration * 60;
+            
             updateDisplay();
+            updateProgress();
             updateStats();
+            updateSessionIndicator();
             setupTabs();
             
             // Обработчик для входных данных задач
@@ -500,6 +506,13 @@
                     addTask();
                 }
             });
+            
+            // Автосохранение данных каждые 30 секунд
+            setInterval(() => {
+                if (isRunning) {
+                    saveStats();
+                }
+            }, 30000);
         });
 
         // Управление табами
@@ -584,7 +597,11 @@
             }, 10);
             
             if (isBreak) {
-                // Завершение перерыва
+                // Завершение перерыва - добавляем время отдыха в статистику
+                const completedBreakTime = (completedSessions % settings.longBreakInterval === 0) ? 
+                    settings.longBreakDuration : settings.shortBreakDuration;
+                stats.breakTime += completedBreakTime;
+                
                 isBreak = false;
                 timeLeft = settings.workDuration * 60;
                 updateSessionIndicator();
@@ -696,7 +713,8 @@
             settings.longBreakDuration = parseInt(document.getElementById('longBreakDuration').value);
             settings.longBreakInterval = parseInt(document.getElementById('longBreakInterval').value);
             
-            // Сохранение в переменные (в реальном приложении используйте localStorage)
+            // Сохранение в localStorage
+            localStorage.setItem('pomodoroSettings', JSON.stringify(settings));
             showNotification('Настройки сохранены! ✅');
             
             // Обновление текущего таймера, если он не запущен
@@ -713,7 +731,12 @@
         }
 
         function loadSettings() {
-            // В реальном приложении загрузите из localStorage
+            // Загрузка из localStorage
+            const savedSettings = localStorage.getItem('pomodoroSettings');
+            if (savedSettings) {
+                settings = JSON.parse(savedSettings);
+            }
+            
             document.getElementById('workDuration').value = settings.workDuration;
             document.getElementById('shortBreakDuration').value = settings.shortBreakDuration;
             document.getElementById('longBreakDuration').value = settings.longBreakDuration;
@@ -779,30 +802,30 @@
         }
 
         function saveTasks() {
-            // В реальном приложении сохраните в localStorage
-            // localStorage.setItem('pomodoroTasks', JSON.stringify(tasks));
+            // Сохранение в localStorage
+            localStorage.setItem('pomodoroTasks', JSON.stringify(tasks));
         }
 
         function loadTasks() {
-            // В реальном приложении загрузите из localStorage
-            // const savedTasks = localStorage.getItem('pomodoroTasks');
-            // if (savedTasks) {
-            //     tasks = JSON.parse(savedTasks);
-            // }
+            // Загрузка из localStorage
+            const savedTasks = localStorage.getItem('pomodoroTasks');
+            if (savedTasks) {
+                tasks = JSON.parse(savedTasks);
+            }
             renderTasks();
         }
 
         function saveStats() {
-            // В реальном приложении сохраните в localStorage
-            // localStorage.setItem('pomodoroStats', JSON.stringify(stats));
+            // Сохранение в localStorage
+            localStorage.setItem('pomodoroStats', JSON.stringify(stats));
         }
 
         function loadStats() {
-            // В реальном приложении загрузите из localStorage
-            // const savedStats = localStorage.getItem('pomodoroStats');
-            // if (savedStats) {
-            //     stats = JSON.parse(savedStats);
-            // }
+            // Загрузка из localStorage
+            const savedStats = localStorage.getItem('pomodoroStats');
+            if (savedStats) {
+                stats = JSON.parse(savedStats);
+            }
         }
 
         // Обработчики событий Telegram Web App
