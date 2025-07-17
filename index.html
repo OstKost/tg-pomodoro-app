@@ -439,7 +439,30 @@
                     <label>Помодоро до длинного перерыва:</label>
                     <input type="number" id="longBreakInterval" value="4" min="2" max="10">
                 </div>
-                <button class="btn" onclick="saveSettings()">💾 Сохранить</button>
+                <div class="controls">
+                    <button class="btn" onclick="saveSettings()">💾 Сохранить</button>
+                    <button class="btn btn-secondary" onclick="syncData()">🔄 Синхронизировать</button>
+                </div>
+                <div class="controls">
+                    <button class="btn btn-secondary" onclick="exportData()">📤 Экспорт</button>
+                    <button class="btn btn-danger" onclick="clearAllData()">🗑️ Очистить всё</button>
+                </div>
+            </div>
+            
+            <div class="settings">
+                <h3>☁️ Хранение данных</h3>
+                <div class="setting-item">
+                    <label>Telegram CloudStorage:</label>
+                    <span id="cloudStorageStatus" class="stat-value"></span>
+                </div>
+                <div class="setting-item">
+                    <label>Резервное хранилище:</label>
+                    <span class="stat-value">localStorage</span>
+                </div>
+                <div class="setting-item">
+                    <label>Автосохранение:</label>
+                    <span class="stat-value">каждые 30 сек</span>
+                </div>
             </div>
         </div>
     </div>
@@ -455,6 +478,90 @@
         // Настройки темы
         document.body.style.backgroundColor = tg.backgroundColor || '#ffffff';
         document.body.style.color = tg.textColor || '#000000';
+
+        // Проверка доступности CloudStorage
+        const isCloudStorageAvailable = tg.CloudStorage && typeof tg.CloudStorage.getItems === 'function';
+        console.log('CloudStorage доступен:', isCloudStorageAvailable);
+
+        // Вспомогательные функции для работы с хранилищем
+        function setStorageItem(key, value) {
+            const stringValue = JSON.stringify(value);
+            
+            if (isCloudStorageAvailable) {
+                tg.CloudStorage.setItem(key, stringValue, (error) => {
+                    if (error) {
+                        console.error('Ошибка сохранения в CloudStorage:', error);
+                        // Fallback на localStorage
+                        localStorage.setItem(key, stringValue);
+                    }
+                });
+            } else {
+                // Fallback на localStorage
+                localStorage.setItem(key, stringValue);
+            }
+        }
+
+        function getStorageItem(key, callback) {
+            if (isCloudStorageAvailable) {
+                tg.CloudStorage.getItem(key, (error, value) => {
+                    if (error) {
+                        console.error('Ошибка загрузки из CloudStorage:', error);
+                        // Fallback на localStorage
+                        const fallbackValue = localStorage.getItem(key);
+                        callback(fallbackValue ? JSON.parse(fallbackValue) : null);
+                    } else {
+                        callback(value ? JSON.parse(value) : null);
+                    }
+                });
+            } else {
+                // Fallback на localStorage
+                const value = localStorage.getItem(key);
+                callback(value ? JSON.parse(value) : null);
+            }
+        }
+
+        function getStorageItems(keys, callback) {
+            if (isCloudStorageAvailable) {
+                tg.CloudStorage.getItems(keys, (error, values) => {
+                    if (error) {
+                        console.error('Ошибка загрузки из CloudStorage:', error);
+                        // Fallback на localStorage
+                        const fallbackValues = {};
+                        keys.forEach(key => {
+                            const value = localStorage.getItem(key);
+                            fallbackValues[key] = value ? JSON.parse(value) : null;
+                        });
+                        callback(fallbackValues);
+                    } else {
+                        const parsedValues = {};
+                        for (const key in values) {
+                            parsedValues[key] = values[key] ? JSON.parse(values[key]) : null;
+                        }
+                        callback(parsedValues);
+                    }
+                });
+            } else {
+                // Fallback на localStorage
+                const values = {};
+                keys.forEach(key => {
+                    const value = localStorage.getItem(key);
+                    values[key] = value ? JSON.parse(value) : null;
+                });
+                callback(values);
+            }
+        }
+
+        function removeStorageItem(key) {
+            if (isCloudStorageAvailable) {
+                tg.CloudStorage.removeItem(key, (error) => {
+                    if (error) {
+                        console.error('Ошибка удаления из CloudStorage:', error);
+                    }
+                });
+            } else {
+                localStorage.removeItem(key);
+            }
+        }
 
         // Глобальные переменные
         let timer = null;
@@ -487,18 +594,22 @@
 
         // Инициализация
         document.addEventListener('DOMContentLoaded', function() {
-            loadSettings();
-            loadTasks();
-            loadStats();
+            // Показываем индикатор загрузки
+            showNotification('Загрузка данных... ⏳');
             
-            // Инициализация таймера с учетом настроек
-            timeLeft = settings.workDuration * 60;
-            
-            updateDisplay();
-            updateProgress();
-            updateStats();
-            updateSessionIndicator();
-            setupTabs();
+            // Загружаем все данные асинхронно
+            loadAllData(() => {
+                // Инициализация таймера с учетом настроек
+                timeLeft = settings.workDuration * 60;
+                
+                updateDisplay();
+                updateProgress();
+                updateStats();
+                updateSessionIndicator();
+                setupTabs();
+                
+                showNotification('Данные загружены! ✅');
+            });
             
             // Обработчик для входных данных задач
             document.getElementById('taskInput').addEventListener('keypress', function(e) {
@@ -513,7 +624,54 @@
                     saveStats();
                 }
             }, 30000);
+            
+            // Сохранение при закрытии приложения
+            window.addEventListener('beforeunload', () => {
+                saveStats();
+                saveTasks();
+                setStorageItem('pomodoroSettings', settings);
+            });
         });
+
+        // Функция для загрузки всех данных одновременно
+        function loadAllData(callback) {
+            const keys = ['pomodoroSettings', 'pomodoroTasks', 'pomodoroStats'];
+            
+            getStorageItems(keys, (values) => {
+                // Загружаем настройки
+                if (values.pomodoroSettings) {
+                    settings = values.pomodoroSettings;
+                }
+                document.getElementById('workDuration').value = settings.workDuration;
+                document.getElementById('shortBreakDuration').value = settings.shortBreakDuration;
+                document.getElementById('longBreakDuration').value = settings.longBreakDuration;
+                document.getElementById('longBreakInterval').value = settings.longBreakInterval;
+                
+                // Загружаем задачи
+                if (values.pomodoroTasks) {
+                    tasks = values.pomodoroTasks;
+                }
+                renderTasks();
+                
+                // Загружаем статистику
+                const today = new Date().toDateString();
+                if (values.pomodoroStats && values.pomodoroStats.date === today) {
+                    stats = values.pomodoroStats;
+                } else {
+                    // Новый день - сбрасываем дневную статистику
+                    stats = {
+                        completedPomodoros: 0,
+                        workTime: 0,
+                        breakTime: 0,
+                        currentStreak: 0,
+                        date: today
+                    };
+                    setStorageItem('pomodoroStats', stats);
+                }
+                
+                if (callback) callback();
+            });
+        }
 
         // Управление табами
         function setupTabs() {
@@ -713,8 +871,8 @@
             settings.longBreakDuration = parseInt(document.getElementById('longBreakDuration').value);
             settings.longBreakInterval = parseInt(document.getElementById('longBreakInterval').value);
             
-            // Сохранение в localStorage
-            localStorage.setItem('pomodoroSettings', JSON.stringify(settings));
+            // Сохранение в CloudStorage или localStorage
+            setStorageItem('pomodoroSettings', settings);
             showNotification('Настройки сохранены! ✅');
             
             // Обновление текущего таймера, если он не запущен
@@ -730,17 +888,19 @@
             }
         }
 
-        function loadSettings() {
-            // Загрузка из localStorage
-            const savedSettings = localStorage.getItem('pomodoroSettings');
-            if (savedSettings) {
-                settings = JSON.parse(savedSettings);
-            }
-            
-            document.getElementById('workDuration').value = settings.workDuration;
-            document.getElementById('shortBreakDuration').value = settings.shortBreakDuration;
-            document.getElementById('longBreakDuration').value = settings.longBreakDuration;
-            document.getElementById('longBreakInterval').value = settings.longBreakInterval;
+        function loadSettings(callback) {
+            getStorageItem('pomodoroSettings', (savedSettings) => {
+                if (savedSettings) {
+                    settings = savedSettings;
+                }
+                
+                document.getElementById('workDuration').value = settings.workDuration;
+                document.getElementById('shortBreakDuration').value = settings.shortBreakDuration;
+                document.getElementById('longBreakDuration').value = settings.longBreakDuration;
+                document.getElementById('longBreakInterval').value = settings.longBreakInterval;
+                
+                if (callback) callback();
+            });
         }
 
         // Управление задачами
@@ -802,30 +962,75 @@
         }
 
         function saveTasks() {
-            // Сохранение в localStorage
-            localStorage.setItem('pomodoroTasks', JSON.stringify(tasks));
+            // Сохранение в CloudStorage или localStorage
+            setStorageItem('pomodoroTasks', tasks);
         }
 
-        function loadTasks() {
-            // Загрузка из localStorage
-            const savedTasks = localStorage.getItem('pomodoroTasks');
-            if (savedTasks) {
-                tasks = JSON.parse(savedTasks);
-            }
-            renderTasks();
+        function loadTasks(callback) {
+            getStorageItem('pomodoroTasks', (savedTasks) => {
+                if (savedTasks) {
+                    tasks = savedTasks;
+                }
+                renderTasks();
+                if (callback) callback();
+            });
         }
 
         function saveStats() {
-            // Сохранение в localStorage
-            localStorage.setItem('pomodoroStats', JSON.stringify(stats));
+            // Добавляем дату для отслеживания ежедневной статистики
+            const today = new Date().toDateString();
+            const statsWithDate = {
+                ...stats,
+                date: today
+            };
+            
+            // Сохранение в CloudStorage или localStorage
+            setStorageItem('pomodoroStats', statsWithDate);
+            
+            // Также сохраняем общую статистику
+            getStorageItem('pomodoroTotalStats', (totalStats) => {
+                if (!totalStats) {
+                    totalStats = {
+                        totalPomodoros: 0,
+                        totalWorkTime: 0,
+                        totalBreakTime: 0,
+                        bestStreak: 0,
+                        totalDays: 0
+                    };
+                }
+                
+                totalStats.totalPomodoros += (stats.completedPomodoros || 0);
+                totalStats.totalWorkTime += (stats.workTime || 0);
+                totalStats.totalBreakTime += (stats.breakTime || 0);
+                totalStats.bestStreak = Math.max(totalStats.bestStreak, stats.currentStreak || 0);
+                
+                setStorageItem('pomodoroTotalStats', totalStats);
+            });
         }
 
-        function loadStats() {
-            // Загрузка из localStorage
-            const savedStats = localStorage.getItem('pomodoroStats');
-            if (savedStats) {
-                stats = JSON.parse(savedStats);
-            }
+        function loadStats(callback) {
+            getStorageItem('pomodoroStats', (savedStats) => {
+                const today = new Date().toDateString();
+                
+                if (savedStats && savedStats.date === today) {
+                    // Загружаем статистику сегодняшнего дня
+                    stats = savedStats;
+                } else {
+                    // Новый день - сбрасываем дневную статистику
+                    stats = {
+                        completedPomodoros: 0,
+                        workTime: 0,
+                        breakTime: 0,
+                        currentStreak: 0,
+                        date: today
+                    };
+                    
+                    // Сохраняем сброшенную статистику
+                    setStorageItem('pomodoroStats', stats);
+                }
+                
+                if (callback) callback();
+            });
         }
 
         // Обработчики событий Telegram Web App
@@ -850,8 +1055,19 @@
             }
         }
 
+        // Обновление статуса CloudStorage
+        function updateCloudStorageStatus() {
+            const statusElement = document.getElementById('cloudStorageStatus');
+            if (statusElement) {
+                statusElement.textContent = isCloudStorageAvailable ? '✅ Доступно' : '❌ Недоступно';
+            }
+        }
+
         // Обновление главной кнопки при изменении состояния
-        setInterval(updateMainButton, 100);
+        setInterval(() => {
+            updateMainButton();
+            updateCloudStorageStatus();
+        }, 100);
     </script>
 </body>
 </html>
